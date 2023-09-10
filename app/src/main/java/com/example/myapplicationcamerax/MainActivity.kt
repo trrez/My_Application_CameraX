@@ -2,6 +2,7 @@ package com.example.myapplicationcamerax
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.location.Location
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -28,8 +29,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -40,27 +40,41 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import java.io.File
-import java.time.LocalDateTime
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 enum class Pantalla {
     FORM,
-    CAMARA
+    CAMARA,
+    UBICACION
 }
 
 class AppVM : ViewModel() {
     val pantallaActual = mutableStateOf(Pantalla.FORM)
 
     var onPermisoCamaraOk: () -> Unit = {}
+
+    val latitud = mutableStateOf(0.0)
+    val longitud = mutableStateOf(0.0)
+
+    var permisosUbicacionOk:() -> Unit = {}
 }
 
 class FormRegistroVM : ViewModel() {
     val nombre = mutableStateOf("")
-    val foto = mutableStateOf<Uri?>(null)
+    val fotos = mutableStateOf<List<Uri>>(emptyList())
 }
 
 class MainActivity : ComponentActivity() {
-
+    val appVM: AppVM by viewModels()
     val camaraVM: AppVM by viewModels()
     val formRegistroVM: FormRegistroVM by viewModels()
 
@@ -71,6 +85,13 @@ class MainActivity : ComponentActivity() {
     ) {
         if (it[android.Manifest.permission.CAMERA] == true) {
             camaraVM.onPermisoCamaraOk()
+        } else if (
+            (it[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: false) or
+            (it[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false)
+        ) {
+            appVM.permisosUbicacionOk()
+        } else {
+            Log.v("LanzadorPermisos callback", "Se denegaron los permisos")
         }
     }
 
@@ -98,6 +119,9 @@ fun AppUI(lanzadorPermisos: ActivityResultLauncher<Array<String>>, cameraControl
         Pantalla.CAMARA -> {
             PantallaCamaraUI(lanzadorPermisos, cameraController)
         }
+        Pantalla.UBICACION ->{
+            PantallaUbicacionUI(appVM,lanzadorPermisos)
+        }
     }
 }
 
@@ -106,12 +130,15 @@ fun uri2imageBitmap(uri: Uri, contexto: Context) =
         contexto.contentResolver.openInputStream(uri)
     ).asImageBitmap()
 
+class FaltaPermisosException(mensaje:String): Exception(mensaje)
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaFormUI() {
     val contexto = LocalContext.current
     val appVM: AppVM = viewModel()
-    val formRegstroVM: FormRegistroVM = viewModel()
+    val formRegistroVM: FormRegistroVM = viewModel()
 
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -120,9 +147,9 @@ fun PantallaFormUI() {
     ) {
         // Campo de texto para el nombre
         TextField(
-            value = formRegstroVM.nombre.value,
+            value = formRegistroVM.nombre.value,
             onValueChange = { newValue ->
-                formRegstroVM.nombre.value = newValue
+                formRegistroVM.nombre.value = newValue
             },
             label = { Text("Nombre del lugar visitado") },
             modifier = Modifier
@@ -132,7 +159,7 @@ fun PantallaFormUI() {
 
         // Mostrar el valor actual del campo de texto
         Text(
-            text = "Nombre ingresado: ${formRegstroVM.nombre.value}",
+            text = "Nombre ingresado: ${formRegistroVM.nombre.value}",
             modifier = Modifier.padding(16.dp)
         )
 
@@ -144,12 +171,21 @@ fun PantallaFormUI() {
         }) {
             Text("Tomar foto")
         }
-    }
-    formRegstroVM.foto.value?.let {
-        Image(
-            painter = BitmapPainter(uri2imageBitmap(it, contexto)),
-            contentDescription = "Imagen capturada desde cameraX"
-        )
+
+        Button(onClick = {
+            appVM.pantallaActual.value = Pantalla.UBICACION
+        }) {
+            Text("Ubicacion")
+        }
+
+        // Mostrar las fotos capturadas
+        formRegistroVM.fotos.value.forEachIndexed { index, uri ->
+            val bitmap = uri2imageBitmap(uri, contexto)
+            Image(
+                painter = BitmapPainter(bitmap),
+                contentDescription = "Imagen capturada $index"
+            )
+        }
     }
 }
 
@@ -175,38 +211,42 @@ fun PantallaCamaraUI(
     Button(onClick = {
         capturarFotografia(
             cameraController,
-            crearArchivoImagenPrivada(contexto),
+            formRegistroVM.nombre.value, // Pasa el nombre del lugar visitado
             contexto
         ) {
-            formRegistroVM.foto.value = it
+            formRegistroVM.fotos.value = formRegistroVM.fotos.value + it
             appVM.pantallaActual.value = Pantalla.FORM
         }
     }) {
-        Text("Sacar Foto")
+        Text("Tomar Foto")
     }
 }
 
-fun generarNombreSegunFechaHastaSegundo(): String = LocalDateTime
-    .now().toString().replace(Regex("[T:.-]"), "").substring(0, 14)
-
-fun crearArchivoImagenPrivada(contexto: Context): File = File(
-    contexto.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
-    "${generarNombreSegunFechaHastaSegundo()}.jpg"
-)
+fun generarNombreUnico(): String {
+    val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+    return "IMG_$timeStamp"
+}
 
 fun capturarFotografia(
     cameraController: LifecycleCameraController,
-    archivo: File,
+    nombreLugar: String,
     contexto: Context,
     onImagenGuardada: (uri: Uri) -> Unit
 ) {
-    val opciones = ImageCapture.OutputFileOptions.Builder(archivo).build()
+    val directorioFotos = File(contexto.getExternalFilesDir(Environment.DIRECTORY_PICTURES), nombreLugar)
+    directorioFotos.mkdirs()
+
+    val nombreFoto = generarNombreUnico() + ".jpg"
+    val archivoFoto = File(directorioFotos, nombreFoto)
+
+    val opciones = ImageCapture.OutputFileOptions.Builder(archivoFoto).build()
     cameraController.takePicture(
         opciones,
         ContextCompat.getMainExecutor(contexto),
         object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                 outputFileResults.savedUri?.let {
+                    Log.v("etiqueta", "URI = $it")
                     onImagenGuardada(it)
                 }
             }
@@ -217,3 +257,82 @@ fun capturarFotografia(
         }
     )
 }
+
+
+fun conseguirUbicacion(contexto: Context, onSuccess:(ubicacion: Location)-> Unit){
+    try {
+        val servicio = LocationServices.getFusedLocationProviderClient(contexto)
+        val tarea = servicio.getCurrentLocation(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            null
+        )
+        tarea.addOnSuccessListener {
+            onSuccess(it)
+        }
+    }catch (se:SecurityException){
+        throw FaltaPermisosException("Sin Permisos de ubicacion")
+    }
+
+}
+
+@Composable
+fun PantallaUbicacionUI(appVM:AppVM, lanzadorPermisos:ActivityResultLauncher<Array<String>> ){
+    val contexto = LocalContext.current
+
+
+    Column (){
+        Button(onClick = {
+            appVM.permisosUbicacionOk = {
+                conseguirUbicacion(contexto) {
+                    appVM.latitud.value = it.latitude
+                    appVM.longitud.value = it.longitude
+                }
+            }
+
+
+            lanzadorPermisos.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+
+        }) {
+            Text("Conseguir Ubicacion")
+        }
+        Text("Lat: ${appVM.latitud.value} Long: ${appVM.longitud.value}")
+        Button(onClick = {
+            appVM.pantallaActual.value = Pantalla.FORM
+        }) {
+            Text("Regresar")
+        }
+        Spacer(Modifier.height(100.dp))
+
+
+
+        AndroidView(
+            factory = {
+                MapView(it).apply  {
+                    setTileSource(TileSourceFactory.MAPNIK)
+
+                    org.osmdroid.config.Configuration.getInstance().userAgentValue =
+                        contexto.packageName
+                    controller.setZoom(15.0)
+                }
+            }, update = {
+                it.overlays.removeIf{ true }
+                it.invalidate()
+
+                val geoPoint = GeoPoint(appVM.latitud.value, appVM.longitud.value)
+                it.controller.animateTo(geoPoint)
+
+                val marcador = Marker(it)
+                marcador.position = geoPoint
+                marcador.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                it.overlays.add(marcador)
+            }
+        )
+    }
+}
+
+
