@@ -86,10 +86,7 @@ dependencies {
     // Si se quiere utilizar las extensiones de CameraX
     //implementation("androidx.camera:camera-extensions:${camerax_version}")
 
-    implementation ("com.github.bumptech.glide:glide:4.12.0")
-    annotationProcessor ("com.github.bumptech.glide:compiler:4.12.0")
-    implementation ("io.coil-kt:coil-compose:1.3.2") // Asegúrate de usar la última versión
-    implementation ("androidx.compose.ui:ui-tooling:1.0.5")
+    implementation ("io.coil-kt:coil-compose:1.3.2")
 
 
     // GPS
@@ -97,8 +94,4 @@ dependencies {
 
     // Open Street Map(osmdroid)
     implementation("org.osmdroid:osmdroid-android:6.1.16")
-
-    implementation ("androidx.activity:activity-ktx:1.3.1")
-    implementation ("androidx.lifecycle:lifecycle-viewmodel-ktx:2.3.1")
-
 }

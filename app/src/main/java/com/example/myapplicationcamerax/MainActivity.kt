@@ -18,7 +18,10 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.*
@@ -34,12 +38,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.rememberImagePainter
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -54,7 +60,7 @@ import java.util.Locale
 enum class Pantalla {
     FORM,
     CAMARA,
-    UBICACION
+    UBICACION,
 }
 
 class AppVM : ViewModel() {
@@ -66,6 +72,8 @@ class AppVM : ViewModel() {
     val longitud = mutableStateOf(0.0)
 
     var permisosUbicacionOk:() -> Unit = {}
+
+    val imagenSeleccionada = mutableStateOf<Uri?>(null)
 }
 
 class FormRegistroVM : ViewModel() {
@@ -112,18 +120,35 @@ class MainActivity : ComponentActivity() {
 fun AppUI(lanzadorPermisos: ActivityResultLauncher<Array<String>>, cameraController: LifecycleCameraController) {
     val appVM: AppVM = viewModel()
 
-    when (appVM.pantallaActual.value) {
+    when (val pantallaActual = appVM.pantallaActual.value) {
         Pantalla.FORM -> {
             PantallaFormUI()
         }
         Pantalla.CAMARA -> {
             PantallaCamaraUI(lanzadorPermisos, cameraController)
         }
-        Pantalla.UBICACION ->{
-            PantallaUbicacionUI(appVM,lanzadorPermisos)
+        Pantalla.UBICACION -> {
+            PantallaUbicacionUI(appVM, lanzadorPermisos)
+        }
+
+        else -> {
+            PantallaImagenCompleta(
+                imagenUri = appVM.imagenSeleccionada.value,
+                onClose = {
+                    appVM.imagenSeleccionada.value = null // Cerrar la pantalla de imagen completa
+                }
+            )
         }
     }
+    PantallaImagenCompleta(
+        imagenUri = appVM.imagenSeleccionada.value,
+        onClose = {
+            appVM.imagenSeleccionada.value = null // Cerrar la pantalla de imagen completa
+        }
+    )
 }
+
+
 
 fun uri2imageBitmap(uri: Uri, contexto: Context) =
     BitmapFactory.decodeStream(
@@ -183,7 +208,10 @@ fun PantallaFormUI() {
             val bitmap = uri2imageBitmap(uri, contexto)
             Image(
                 painter = BitmapPainter(bitmap),
-                contentDescription = "Imagen capturada $index"
+                contentDescription = "Imagen capturada $index",
+                modifier = Modifier.clickable {
+                    appVM.imagenSeleccionada.value = uri
+                }
             )
         }
     }
@@ -336,3 +364,24 @@ fun PantallaUbicacionUI(appVM:AppVM, lanzadorPermisos:ActivityResultLauncher<Arr
 }
 
 
+@Composable
+fun PantallaImagenCompleta(
+    imagenUri: Uri?,
+    onClose: () -> Unit
+) {
+    if (imagenUri != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .clickable { onClose() }
+        ) {
+            Image(
+                painter = rememberImagePainter(data = imagenUri),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
