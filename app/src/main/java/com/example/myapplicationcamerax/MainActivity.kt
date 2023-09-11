@@ -130,20 +130,11 @@ fun AppUI(lanzadorPermisos: ActivityResultLauncher<Array<String>>, cameraControl
         Pantalla.UBICACION -> {
             PantallaUbicacionUI(appVM, lanzadorPermisos)
         }
-
-        else -> {
-            PantallaImagenCompleta(
-                imagenUri = appVM.imagenSeleccionada.value,
-                onClose = {
-                    appVM.imagenSeleccionada.value = null // Cerrar la pantalla de imagen completa
-                }
-            )
-        }
     }
     PantallaImagenCompleta(
         imagenUri = appVM.imagenSeleccionada.value,
         onClose = {
-            appVM.imagenSeleccionada.value = null // Cerrar la pantalla de imagen completa
+            appVM.imagenSeleccionada.value = null
         }
     )
 }
